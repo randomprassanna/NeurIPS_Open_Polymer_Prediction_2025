@@ -56,6 +56,9 @@ class PolymerGNN(nn.Module):
     def forward(self, data):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
         global_features = data.global_features
+        if len(global_features.shape) == 1:
+            batch_size = torch.max(batch).item() + 1
+            global_features = global_features.view(batch_size, -1)
         
         # Embed nodes and edges
         x = self.node_embedding(x)
@@ -82,7 +85,6 @@ class PolymerGNN(nn.Module):
         graph_repr = torch.cat([graph_mean, graph_max, graph_add], dim=1)
         graph_repr = self.graph_conv(graph_repr)
         graph_repr = F.relu(graph_repr)
-        
         # Process global molecular descriptors
         global_repr = self.global_fc(global_features)
         
@@ -125,6 +127,9 @@ class SimpleGCN(nn.Module):
     def forward(self, data):
         x, edge_index, batch = data.x, data.edge_index, data.batch
         global_features = data.global_features
+        if len(global_features.shape) == 1:
+            batch_size = torch.max(batch).item() + 1
+            global_features = global_features.view(batch_size, -1)
         
         # GCN layers
         x = self.conv1(x, edge_index)

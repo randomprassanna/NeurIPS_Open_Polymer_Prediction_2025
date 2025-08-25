@@ -16,6 +16,10 @@ def train_epoch(model, loader, optimizer, criterion, device):
     
     for batch in tqdm(loader, desc="Training"):
         batch = batch.to(device)
+        if len(batch.y.shape) == 1:
+            batch_size = torch.max(batch.batch).item() + 1
+            num_targets = 5  # You have 5 properties
+            batch.y = batch.y.view(batch_size, num_targets)
         optimizer.zero_grad()
         
         out = model(batch)
@@ -36,6 +40,9 @@ def evaluate(model, loader, criterion, device):
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
+            if len(batch.y.shape) == 1:
+                batch_size = torch.max(batch.batch).item() + 1
+                batch.y = batch.y.view(batch_size, 5)
             out = model(batch)
             loss = criterion(out, batch.y)
             total_loss += loss.item()
@@ -55,7 +62,7 @@ def main():
     
     # Load preprocessed data
     print("Loading preprocessed data...")
-    train_graphs = torch.load('train_graphs.pt')
+    train_graphs = torch.load('train_graphs.pt', weights_only=False)
     
     # Filter out graphs with all NaN targets
     valid_graphs = []
@@ -69,8 +76,8 @@ def main():
     train_data, val_data = train_test_split(valid_graphs, test_size=0.2, random_state=42)
     
     # Create data loaders
-    train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
+    train_loader = DataLoader(train_data, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val_data, batch_size=64, shuffle=False)
     
     # Initialize model
     model = PolymerGNN(
@@ -150,7 +157,7 @@ def main():
     
     plt.subplot(1, 2, 2)
     # Load best model for final evaluation
-    checkpoint = torch.load('best_model.pt')
+    checkpoint = torch.load('best_model.pt', weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     _, final_preds, final_targets = evaluate(model, val_loader, criterion, device)

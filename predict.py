@@ -24,8 +24,8 @@ def main():
     
     # Load test data
     print("Loading test data...")
-    test_graphs = torch.load('test_graphs.pt')
-    test_ids = torch.load('test_ids.pt')
+    test_graphs = torch.load('test_graphs.pt', weights_only=False)
+    test_ids = torch.load('test_ids.pt', weights_only=False)
     
     test_loader = DataLoader(test_graphs, batch_size=32, shuffle=False)
     
@@ -41,7 +41,7 @@ def main():
         dropout=0.2
     ).to(device)
     
-    checkpoint = torch.load('best_model.pt', map_location=device)
+    checkpoint = torch.load('best_model.pt', map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     print(f"Loaded model from epoch {checkpoint['epoch']} with validation loss: {checkpoint['val_loss']:.4f}")

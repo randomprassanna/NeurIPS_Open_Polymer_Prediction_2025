@@ -42,7 +42,7 @@ def smiles_to_graph(smiles):
         bond_feature = [
             bond.GetBondTypeAsDouble(),
             bond.GetIsConjugated(),
-            bond.GetIsInRing(),
+            bond.IsInRing(),
         ]
         edge_features.extend([bond_feature, bond_feature])
     
@@ -152,9 +152,9 @@ def preprocess_data():
     print("Saving processed data...")
     
     # Save processed data
-    torch.save(train_graphs, 'train_graphs.pt')
-    torch.save(test_graphs, 'test_graphs.pt')
-    torch.save(test_ids, 'test_ids.pt')
+    torch.save(train_graphs, 'train_graphs.pt', _use_new_zipfile_serialization=False)
+    torch.save(test_graphs, 'test_graphs.pt', _use_new_zipfile_serialization=False)
+    torch.save(test_ids, 'test_ids.pt', _use_new_zipfile_serialization=False)
     
     with open('scaler.pkl', 'wb') as f:
         pickle.dump(scaler, f)
