@@ -4,6 +4,120 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool, global_add_pool
 from torch_geometric.nn import BatchNorm
 
+import torch
+import torch.nn.functional as F
+from torch import nn
+from torch_geometric.nn import GINEConv, global_mean_pool, global_max_pool, global_add_pool
+from torch_geometric.utils import softmax
+from torch_scatter import scatter
+
+class BigPolymerGINE(nn.Module):
+    """
+    Heavy GINE + graph-level attention pooling.
+    Same __init__ signature so nothing else changes.
+    """
+    def __init__(self,
+                 num_node_features=7,
+                 num_edge_features=3,
+                 global_features_dim=10,
+                 hidden_dim=512,
+                 num_layers=8,
+                 num_targets=5,
+                 dropout=0.15):
+        super().__init__()
+
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.hidden_dim = hidden_dim
+
+        # 1. Embeddings
+        self.node_embed = nn.Sequential(
+            nn.Linear(num_node_features, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        self.edge_embed = nn.Sequential(
+            nn.Linear(num_edge_features, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+
+        # 2. GINE stack (double-MLP for stronger expressivity)
+        self.gine_layers = nn.ModuleList()
+        self.bns = nn.ModuleList()
+        for _ in range(num_layers):
+            nn1 = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.BatchNorm1d(hidden_dim),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            self.gine_layers.append(GINEConv(nn1, train_eps=True))
+            self.bns.append(nn.BatchNorm1d(hidden_dim))
+
+        # 3. Graph-level attention pooling
+        self.attn_query = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 4),
+            nn.Tanh()
+        )
+        self.attn_key = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 4),
+            nn.Tanh()
+        )
+
+        # 4. Global descriptor tower
+        self.global_fc = nn.Sequential(
+            nn.Linear(global_features_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2)
+        )
+
+        # 5. Final predictor
+        self.predictor = nn.Sequential(
+            nn.Linear(hidden_dim + hidden_dim // 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, num_targets)
+        )
+
+    # ------------------------------------------------------------------ #
+    def forward(self, data):
+        x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
+        global_features = data.global_features
+
+        # --- 1. Embed nodes & edges
+        x = self.node_embed(x)
+        edge_attr = self.edge_embed(edge_attr)
+
+        # --- 2. GINE stack
+        for gine, bn in zip(self.gine_layers, self.bns):
+            x = x + gine(x, edge_index, edge_attr)   # residual
+            x = bn(x)
+            x = F.relu(x)
+
+        # --- 3. Attention-based pooling
+        query = self.attn_query(x)                       # [N, d/4]
+        key = self.attn_key(x)                           # [N, d/4]
+        score = (query * key).sum(dim=-1)                # [N]
+        score = softmax(score, batch)                    # [N] attention weights
+        graph_repr = scatter(x * score.unsqueeze(-1), batch, dim=0, reduce='sum')
+
+        # --- 4. Global descriptor
+        if global_features.dim() == 1:
+            global_features = global_features.view(batch.max().item() + 1, -1)
+        global_repr = self.global_fc(global_features)
+
+        # --- 5. Combine & predict
+        out = torch.cat([graph_repr, global_repr], dim=1)
+        return self.predictor(out)
+
 class PolymerGNN(nn.Module):
     def __init__(self, num_node_features=7, num_edge_features=3, global_features_dim=10, 
                  hidden_dim=128, num_layers=4, num_targets=5, dropout=0.2):
